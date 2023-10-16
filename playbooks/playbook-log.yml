@@ -1,0 +1,63 @@
+---
+  - name: Configure playbook
+    hosts: log
+    become: yes
+
+    tasks:
+    - name: set timezone Europe/Moscow
+      ansible.builtin.command: 
+        cmd: timedatectl set-timezone Europe/Moscow
+        
+    - name: restart chronyd
+      ansible.builtin.service:
+        name: chronyd
+        state: restarted
+    
+    - name: epel-release
+      ansible.builtin.yum:
+        name: epel-release
+        state: present
+
+    - name: Update rsyslog
+      ansible.builtin.lineinfile:
+        path: /etc/rsyslog.conf
+        regexp: "{{ item.regexp }}"
+        line: "{{ item.line }}"
+      with_items:
+        - { regexp: '#\$ModLoad imudp', line: '$ModLoad imudp'}
+        - { regexp: '#\$UDPServerRun 514', line: '$UDPServerRun 514'}
+        - { regexp: '#\$ModLoad imtcp', line: '$ModLoad imtcp'}
+        - { regexp: '#\$InputTCPServerRun 514', line: '$InputTCPServerRun 514'}
+    
+    - name: Add remote logs
+      ansible.builtin.lineinfile:
+        line: "{{ item }}"
+        path: /etc/rsyslog.conf
+        create: true
+      loop:
+        - '$AllowedSender UDP, 192.168.56.0/24, [::1]/128'
+        - '$template RemoteLogs,"/var/log/rsyslog/%HOSTNAME%/%PROGRAMNAME%.log"'
+        - '*.* ?RemoteLogs'
+        - '& ~'
+      notify:
+        - Restart rsyslog
+        
+    - name: change /etc/audit/auditd.conf
+      ansible.builtin.lineinfile:
+        path: /etc/audit/auditd.conf
+        line: "tcp_listen_port = 60"
+      notify:
+        - Restart auditd
+    
+
+
+    handlers:  
+    - name: Restart rsyslog
+      ansible.builtin.service:
+        name: rsyslog
+        state: restarted
+    - name: Restart auditd
+      ansible.builtin.command:
+        cmd: /sbin/service auditd restart
+
+    

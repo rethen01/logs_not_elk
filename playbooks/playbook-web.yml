@@ -1,0 +1,92 @@
+---
+  - name: Configure playbook
+    hosts: web
+    become: yes
+
+    tasks:
+    - name: set timezone Europe/Moscow
+      ansible.builtin.command: 
+        cmd: timedatectl set-timezone Europe/Moscow
+        
+    - name: restart chronyd
+      ansible.builtin.service:
+        name: chronyd
+        state: restarted
+    
+    - name: epel-release
+      ansible.builtin.yum:
+        name: epel-release
+        state: present
+    
+    - name: install nginx
+      ansible.builtin.yum:
+        name: nginx
+        state: present
+    
+    - name: start nginx
+      ansible.builtin.service:
+        name: nginx
+        state: started
+        enabled: true
+    
+    - name: change conf nginx
+      ansible.builtin.template:
+        src=nginx.conf
+        dest=/etc/nginx/nginx.conf
+      notify:
+      - Restart nginx
+
+    - name: Copy conf rsyslog client
+      ansible.builtin.template:
+        src=all_log.conf
+        dest=/etc/rsyslog.d/all_log.conf
+      notify:
+      - Restart rsyslog  
+
+    - name: Add remote logs
+      ansible.builtin.lineinfile:
+        line: "{{ item }}"
+        path: /etc/audit/rules.d/audit.rules
+        create: true
+      loop:
+        - '-w /etc/nginx/nginx.conf -p wa -k nginx_conf'
+        - '-w /etc/nginx/default.d/ -p wa -k nginx_conf'
+
+    - name: change /etc/audit/auditd.conf
+      ansible.builtin.lineinfile:
+        path: /etc/audit/auditd.conf
+        regexp: "name_format = NONE"
+        line: "name_format = HOSTNAME"
+    
+    - name: Install audispd-plugins
+      ansible.builtin.yum:
+        name: audispd-plugins
+        state: present
+
+    - name: change /etc/audisp/plugins.d/au-remote.conf
+      ansible.builtin.lineinfile:
+        path: /etc/audisp/plugins.d/au-remote.conf
+        regexp: "active = no"
+        line: "active = yes"
+    
+    - name: change /etc/audisp/audisp-remote.conf
+      ansible.builtin.lineinfile:
+        path: /etc/audisp/audisp-remote.conf
+        regexp: "remote_server ="
+        line: "remote_server = 192.168.56.15"
+      notify:
+        - Restart auditd
+        
+    handlers:
+      - name: Restart nginx
+        ansible.builtin.service:
+          name: nginx
+          state: restarted
+      - name: Restart rsyslog
+        ansible.builtin.service:
+          name: rsyslog
+          state: restarted
+      - name: Restart auditd
+        ansible.builtin.command:
+          cmd: /sbin/service auditd restart
+
